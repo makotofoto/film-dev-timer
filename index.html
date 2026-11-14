@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>底片沖洗時鐘</title>
+<style>
+  :root {
+    --bg: #121212;
+    --panel: #1d1d1f;
+    --panel2: #2a2a2e;
+    --text: #f2ede4;
+    --dim: #9b948a;
+    --accent: #e0392f;      /* 暗房紅 */
+    --accent-soft: #ff6b5e;
+    --ok: #4caf7d;
+    --ring-bg: #333338;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "PingFang TC", "Noto Sans TC", -apple-system, sans-serif;
+    overflow: hidden;
+    user-select: none; -webkit-user-select: none;
+  }
+  .app {
+    height: 100dvh;
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex; flex-direction: column;
+    padding: calc(4px + env(safe-area-inset-top)) 12px calc(8px + env(safe-area-inset-bottom));
+    gap: 8px;
+  }
+  header { text-align: center; flex: 0 0 auto; }
+  header h1 { font-size: 12px; letter-spacing: 5px; font-weight: 600; color: var(--dim); }
+
+  .main { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+
+  /* ============ 計時主面板 ============ */
+  .timer-panel {
+    background: var(--panel);
+    border-radius: 16px;
+    padding: 10px 14px 12px;
+    flex: 0 0 auto;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+  }
+  .tp-head { display: flex; align-items: baseline; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .step-label { font-size: 12px; color: var(--dim); letter-spacing: 2px; }
+  .step-name  { font-size: clamp(18px, 5vw, 24px); font-weight: 700; letter-spacing: 3px; }
+  .sn-en { font-size: 12px; font-weight: 600; color: var(--dim); letter-spacing: 1px; }
+
+  /* 倒數圓圈 */
+  .ring-wrap {
+    position: relative;
+    width: clamp(170px, 50vw, 240px);
+    aspect-ratio: 1;
+  }
+  .ring-wrap svg { width: 100%; height: 100%; transform: rotate(-90deg); display: block; }
+  .ring-bg { stroke: var(--ring-bg); }
+  .ring-fg {
+    stroke: var(--accent);
+    transition: stroke-dashoffset .25s linear;
+  }
+  .time-in-ring {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .time-in-ring .t {
+    font-size: clamp(38px, 11vw, 56px);
+    font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 1px;
+  }
+  .time-in-ring .t.waiting { color: var(--dim); }
+  .time-in-ring .total { font-size: 11px; color: var(--dim); margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+  /* 最後 5 秒：整個圓圈 + 數字 跟著每一秒閃一下 */
+  .ring-wrap.flash .ring-fg,
+  .ring-wrap.flash .ring-bg { animation: ringFlash .45s ease-out; }
+  .ring-wrap.flash .t { animation: digitFlash .45s ease-out; }
+  @keyframes ringFlash {
+    0%   { stroke: #ffffff; filter: drop-shadow(0 0 14px var(--accent-soft)); }
+    100% { stroke-opacity: 1; }
+  }
+  @keyframes digitFlash {
+    0%   { color: #ffffff; text-shadow: 0 0 22px var(--accent-soft); transform: scale(1.08); }
+    100% { transform: scale(1); }
+  }
+  .ring-wrap.last5 .ring-fg { stroke: var(--accent-soft); }
+  .time-in-ring .t.last5 { color: var(--accent-soft); }
+
+  .step-note  {
+    text-align: center; font-size: 11.5px; color: var(--dim); line-height: 1.45;
+    min-height: 16px; white-space: pre-line;
+  }
+
+  /* 自動下一步勾選（預設手動） */
+  .mode-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 0;
+    cursor: pointer; user-select: none;
+  }
+  .mode-row input { accent-color: var(--accent); width: 18px; height: 18px; cursor: pointer; }
+  .mode-row label { font-size: 14px; font-weight: 600; color: var(--text); cursor: pointer; }
+
+  .controls { display: flex; gap: 10px; justify-content: center; margin-top: 6px; width: 100%; }
+  button {
+    font-family: inherit; border: none; cursor: pointer;
+    border-radius: 14px; font-size: 18px; font-weight: 700;
+    color: var(--text); background: var(--panel2);
+    padding: 16px 0; flex: 1; max-width: 190px;
+  }
+  button:active { filter: brightness(1.3); }
+  button.primary { background: var(--accent); }
+  button:disabled { opacity: .35; cursor: default; }
+
+  /* ============ 步驟清單 ============ */
+  .steps {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column; gap: 5px;
+    overflow-y: auto;
+  }
+  .step-card {
+    background: var(--panel);
+    border-radius: 11px;
+    padding: 7px 12px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    flex: 1 1 0; min-height: 38px;
+    display: flex; flex-direction: column; justify-content: center; gap: 4px;
+    transition: flex-grow .25s, opacity .25s;
+  }
+  .sc-row { display: grid; grid-template-columns: 24px 1fr auto; gap: 10px; align-items: center; }
+  .step-card.active  { border-color: var(--accent); background: #2b1a1b; flex-grow: 1.6; }
+  .step-card.expanded { flex: 0 0 auto; }   /* 滾輪展開時依內容撐高 */
+  .step-card.done    { opacity: .4; }
+  .step-card.skipped { opacity: .3; }
+  .step-card.skipped .s-name { text-decoration: line-through; }
+
+  .s-num {
+    width: 24px; height: 24px; border-radius: 50%;
+    background: var(--panel2); color: var(--dim);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px;
+    transition: transform .25s;
+  }
+  .step-card.active .s-num { background: var(--accent); color: #fff; }
+  .step-card.done .s-num   { background: var(--ok); color: #0c2018; }
+
+  .s-main { min-width: 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .s-name { font-size: clamp(13px, 3.6vw, 16px); font-weight: 600; letter-spacing: 1px; white-space: nowrap; transition: font-size .25s; }
+  .s-en { font-size: 10.5px; color: var(--dim); letter-spacing: .5px; white-space: nowrap; }
+  .s-note {
+    font-size: 10.5px; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex: 1; min-width: 0;
+  }
+  .s-time { font-size: clamp(14px, 4vw, 17px); font-weight: 700; font-variant-numeric: tabular-nums; transition: font-size .25s; }
+
+  /* 顯影時間：直接點擊編輯 */
+  input.time-input {
+    font-family: inherit; font-weight: 700; font-variant-numeric: tabular-nums;
+    font-size: clamp(14px, 4vw, 17px);
+    width: 5.2ch; text-align: center;
+    color: var(--accent-soft);
+    background: var(--panel2);
+    border: 1px dashed #55555c; border-radius: 8px;
+    padding: 4px 2px;
+    outline: none;
+  }
+  input.time-input:focus { border-style: solid; border-color: var(--accent); background: #3a2a2b; }
+  input.time-input::placeholder { color: var(--dim); letter-spacing: 1px; }
+  body.started .step-card.active input.time-input { font-size: clamp(17px, 4.6vw, 20px); }
+
+  /* ============ 顯影時間滾輪（就地展開、即時套用） ============ */
+  .wheel-picker {
+    position: relative;
+    display: flex; justify-content: center; align-items: center; gap: 2px;
+    height: 136px; margin-top: 6px;
+    touch-action: pan-y;
+  }
+  .wheel-picker[hidden] { display: none; }
+  .wheel-picker::before {
+    content: '';
+    position: absolute; left: 50%; top: 50%;
+    width: 200px; height: 40px;
+    transform: translate(-50%, -50%);
+    background: #3c3c45; border-radius: 10px;
+  }
+  .wheel-col {
+    position: relative; z-index: 1;
+    width: 70px; height: 136px;
+    overflow-y: auto;
+    scroll-snap-type: y mandatory;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 30%, #000 70%, transparent);
+    mask-image: linear-gradient(to bottom, transparent, #000 30%, #000 70%, transparent);
+  }
+  .wheel-col::-webkit-scrollbar { display: none; }
+  .wheel-pad { height: 48px; }
+  .wheel-item {
+    height: 40px; line-height: 40px; text-align: center;
+    font-size: 23px; font-weight: 600; font-variant-numeric: tabular-nums;
+    color: var(--dim); cursor: pointer;
+    scroll-snap-align: center;
+  }
+  .wheel-item.on { color: #fff; }
+  .wheel-colon { z-index: 1; font-size: 23px; font-weight: 700; color: #fff; padding-bottom: 2px; }
+
+  /* 開始後：非進行中的步驟縮小淡化，突顯目前步驟 */
+  body.started .step-card:not(.active) { opacity: .55; }
+  body.started .step-card:not(.active) .s-name { font-size: 12px; }
+  body.started .step-card:not(.active) .s-time { font-size: 12.5px; }
+  body.started .step-card:not(.active) .s-note { display: none; }
+  body.started .step-card:not(.active) .s-num { transform: scale(.8); }
+  body.started .step-card.done { opacity: .3; }
+  body.started .step-card.active { opacity: 1; }
+  body.started .step-card.active .s-name { font-size: clamp(17px, 4.6vw, 20px); }
+  body.started .step-card.active .s-time { font-size: clamp(17px, 4.6vw, 20px); color: var(--accent-soft); }
+
+  /* HCA 省略開關 */
+  .toggle-row { display: inline-flex; align-items: center; gap: 5px; }
+  .toggle-row label { font-size: 10.5px; color: var(--dim); cursor: pointer; white-space: nowrap; }
+  .toggle-row input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+
+  /* ============ 橫放：左計時、右流程 ============ */
+  @media (orientation: landscape) {
+    .main { flex-direction: row; }
+    header { display: none; }
+    .timer-panel { flex: 0 0 46%; justify-content: center; gap: 4px; }
+    .ring-wrap { width: clamp(140px, 34vh, 220px); }
+    .time-in-ring .t { font-size: clamp(30px, 9vh, 48px); }
+    .steps { flex: 1; }
+    .step-card { padding: 5px 12px; min-height: 32px; }
+  }
+  /* 橫放矮螢幕（手機橫放）再壓縮 */
+  @media (orientation: landscape) and (max-height: 500px) {
+    .app { padding-top: 6px; padding-bottom: 6px; gap: 6px; }
+    .timer-panel { padding: 8px 10px; }
+    .ring-wrap { width: clamp(120px, 40vh, 170px); }
+    .step-note { display: none; }
+    .steps { gap: 4px; }
+    .step-card { border-radius: 9px; min-height: 28px; padding: 4px 10px; }
+    .s-note { display: none; }
+    .controls button { padding: 11px 0; font-size: 16px; border-radius: 11px; }
+    .mode-row { padding: 2px 0; }
+    .mode-row label { font-size: 12.5px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header><h1>底片沖洗時鐘</h1></header>
+
+  <div class="main">
+    <!-- 計時主面板 -->
+    <div class="timer-panel">
+      <div class="tp-head">
+        <span class="step-label" id="stepLabel">步驟 —</span>
+        <span class="step-name" id="stepName">準備開始</span>
+      </div>
+
+      <div class="ring-wrap" id="ringWrap">
+        <svg viewBox="0 0 200 200">
+          <circle class="ring-bg" cx="100" cy="100" r="90" fill="none" stroke-width="11"/>
+          <circle class="ring-fg" id="ringFg" cx="100" cy="100" r="90" fill="none" stroke-width="11"
+                  stroke-linecap="round" stroke-dasharray="565.49" stroke-dashoffset="0"/>
+        </svg>
+        <div class="time-in-ring">
+          <div class="t" id="timeDisplay">--:--</div>
+          <div class="total" id="timeTotal"></div>
+        </div>
+      </div>
+
+      <div class="step-note" id="stepNote">按「開始」從步驟 1 預洗開始</div>
+
+      <div class="mode-row">
+        <input type="checkbox" id="chkAuto">
+        <label for="chkAuto">自動下一步</label>
+      </div>
+
+      <div class="controls">
+        <button class="primary" id="btnStart">開始</button>
+        <button id="btnSkip" disabled>下一步</button>
+        <button id="btnReset">重設</button>
+      </div>
+    </div>
+
+    <!-- 步驟清單 -->
+    <div class="steps" id="stepsList"></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const DEV_DEFAULT = 8 * 60; // 顯影預設 8:00，可自由調整
+
+  const steps = [
+    { name: '預洗', en: 'pre-wash', time: 5 * 60, note: '＊注意溫度' },
+    { name: '顯影', en: 'develop', time: DEV_DEFAULT, adjustable: true,
+      note: 'DDX 1:4　LC-29 1:9　＊注意溫度' },
+    { name: '停影', en: 'stop', time: 60, note: '使用冰醋酸' },
+    { name: '定影', en: 'fix', time: 8 * 60, note: 'F24 定影液原液' },
+    { name: '海波清潔劑', en: 'hypo clear agent', time: 2 * 60, skippable: true,
+      note: 'HCA 1:4　＊持續搖晃' },
+    { name: '水洗', en: 'rinse', time: 5 * 60,
+      note: '省略步驟 5 要洗 20 分鐘，或用 Ilford Method' },
+    { name: '水斑防止液', en: 'wetting agent', time: 60, note: '避免起泡，靜置 60 秒' },
+  ];
+
+  const CIRC = 565.49;
+
+  let current = -1;
+  let remaining = 0;
+  let running = false;
+  let waiting = false;        // 手動模式：等使用者按「開始」才跑下一步
+  let autoNext = false;       // 預設手動：每步結束等使用者按「開始」
+  let timerId = null;
+  let skipHCA = false;
+  let finished = false;
+  let lastTickSec = null;
+  let wakeLock = null;
+
+  const $ = id => document.getElementById(id);
+  const ringWrap = $('ringWrap');
+  const ringFg = $('ringFg');
+
+  const fmt = s => {
+    s = Math.max(0, Math.ceil(s));
+    return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+  };
+
+  // ---- 音效 ----
+  let audioCtx = null;
+  function ctx() {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+  function tone(freq, when, dur, vol) {
+    const ac = ctx();
+    const t = ac.currentTime + when;
+    const osc = ac.createOscillator();
+    const g = ac.createGain();
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g).connect(ac.destination);
+    osc.start(t); osc.stop(t + dur + 0.05);
+  }
+  function countTick(sec) {
+    try { tone(sec === 1 ? 1568 : 1175, 0, 0.12, 0.5); } catch (e) {}
+  }
+  function stepEndBeep() {
+    try { tone(880, 0, 0.5, 0.5); tone(880, 0.6, 0.5, 0.5); } catch (e) {}
+  }
+  function allDoneBeep() {
+    try { for (let i = 0; i < 5; i++) tone(988, i * 0.4, 0.3, 0.5); } catch (e) {}
+  }
+
+  // 最後 5 秒：圓圈 + 數字跟著每一秒閃一下（與嗶聲同步）
+  function flashRing() {
+    ringWrap.classList.remove('flash');
+    void ringWrap.offsetWidth;   // 重新觸發動畫
+    ringWrap.classList.add('flash');
+  }
+
+  // ---- 螢幕保持喚醒 ----
+  async function requestWake() {
+    try { wakeLock = await navigator.wakeLock?.request('screen'); } catch (e) {}
+  }
+  function releaseWake() {
+    try { wakeLock?.release(); wakeLock = null; } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && (running || waiting)) requestWake();
+  });
+
+  // ---- 建立步驟清單 ----
+  function buildList() {
+    const list = $('stepsList');
+    list.innerHTML = '';
+    steps.forEach((st, i) => {
+      const card = document.createElement('div');
+      card.className = 'step-card';
+      card.id = 'card' + i;
+
+      let inner = `
+        <div class="sc-row">
+          <div class="s-num">${i + 1}</div>
+          <div class="s-main">
+            <span class="s-name">${st.name}</span>
+            <span class="s-en">${st.en}</span>
+            ${st.skippable ? `
+              <span class="toggle-row">
+                <input type="checkbox" id="chkSkipHCA">
+                <label for="chkSkipHCA">省略（水洗改 20 分）</label>
+              </span>` : `<span class="s-note">${st.note}</span>`}
+          </div>
+          ${st.adjustable
+            ? `<input class="time-input" id="time${i}" placeholder="--:--" value="" inputmode="numeric" maxlength="5" autocomplete="off">`
+            : `<div class="s-time" id="time${i}">${fmt(st.time)}</div>`}
+        </div>`;
+
+      if (st.adjustable) {
+        inner += `
+          <div class="wheel-picker" id="wheelPicker" hidden>
+            <div class="wheel-col" id="wheelMin"></div>
+            <div class="wheel-colon">:</div>
+            <div class="wheel-col" id="wheelSec"></div>
+          </div>`;
+      }
+
+      card.innerHTML = inner;
+      list.appendChild(card);
+    });
+
+    // 顯影時間：點一下就地展開滾輪，滾到哪即時套用
+    const devInput = $('time1');
+    devInput.readOnly = true;
+    devInput.addEventListener('click', e => {
+      e.stopPropagation();
+      devInput.blur();
+      toggleWheel($('wheelPicker').hidden);
+    });
+    setupWheels();
+
+    const chk = $('chkSkipHCA');
+    chk.addEventListener('click', e => e.stopPropagation());
+    chk.addEventListener('change', () => {
+      skipHCA = chk.checked;
+      const rinseIdx = 5;
+      steps[rinseIdx].time = skipHCA ? 20 * 60 : 5 * 60;
+      $('time' + rinseIdx).textContent = fmt(steps[rinseIdx].time);
+      $('card4').classList.toggle('skipped', skipHCA);
+      if (current === rinseIdx && !running) {
+        remaining = steps[rinseIdx].time;
+        render();
+      }
+    });
+  }
+
+  // ---- 顯影時間滾輪：就地展開、滾動即套用 ----
+  const ITEM_H = 40;              // 與 CSS .wheel-item 高度一致
+  const WHEEL_MIN_MAX = 30;       // 分鐘 0–30
+  let devSet = false;             // 使用者是否調過顯影時間
+  let wheelSyncing = false;       // 程式捲動時避免觸發套用
+
+  function buildWheelCol(colEl, count) {
+    colEl.innerHTML = '<div class="wheel-pad"></div>';
+    for (let v = 0; v <= count; v++) {
+      const item = document.createElement('div');
+      item.className = 'wheel-item';
+      item.textContent = String(v).padStart(2, '0');
+      item.addEventListener('click', e => {
+        e.stopPropagation();
+        colEl.scrollTo({ top: v * ITEM_H, behavior: 'smooth' });
+      });
+      colEl.appendChild(item);
+    }
+    colEl.insertAdjacentHTML('beforeend', '<div class="wheel-pad"></div>');
+  }
+
+  function wheelIndex(colEl) {
+    return Math.max(0, Math.round(colEl.scrollTop / ITEM_H));
+  }
+
+  function highlightWheel(colEl) {
+    const idx = wheelIndex(colEl);
+    colEl.querySelectorAll('.wheel-item').forEach((el, i) =>
+      el.classList.toggle('on', i === idx));
+  }
+
+  function applyWheelValue() {
+    const m = Math.min(WHEEL_MIN_MAX, wheelIndex($('wheelMin')));
+    const s = Math.min(59, wheelIndex($('wheelSec')));
+    const t = Math.max(15, m * 60 + s);
+    const st = steps[1];
+    if (t === st.time && devSet) return;
+    const elapsed = st.time - remaining;
+    st.time = t;
+    devSet = true;
+    $('time1').value = fmt(t);
+    if (current === 1) {
+      remaining = Math.max(1, t - Math.max(0, elapsed));
+      render();
+    }
+  }
+
+  function setupWheels() {
+    buildWheelCol($('wheelMin'), WHEEL_MIN_MAX);
+    buildWheelCol($('wheelSec'), 59);
+    [$('wheelMin'), $('wheelSec')].forEach(col => {
+      col.addEventListener('scroll', () => highlightWheel(col), { passive: true });
+    });
+  }
+
+  function toggleWheel(show) {
+    const wp = $('wheelPicker');
+    if (!show && !wp.hidden) applyWheelValue();   // 收起 = 確認套用
+    wp.hidden = !show;
+    $('card1').classList.toggle('expanded', show);
+    if (show) {
+      const cur = steps[1].time;
+      wheelSyncing = true;
+      $('wheelMin').scrollTop = Math.floor(cur / 60) * ITEM_H;
+      $('wheelSec').scrollTop = (cur % 60) * ITEM_H;
+      highlightWheel($('wheelMin'));
+      highlightWheel($('wheelSec'));
+      requestAnimationFrame(() => { wheelSyncing = false; });
+      $('card1')?.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  // 滾輪展開時：除了滾輪數字本身，點任何地方都＝確認收起
+  document.addEventListener('click', e => {
+    const wp = $('wheelPicker');
+    if (!wp || wp.hidden) return;
+    if (e.target.closest('.wheel-col') || e.target === $('time1')) return;
+    e.stopPropagation();   // 這一下只做「確認」，不誤觸底下的按鈕或步驟
+    e.preventDefault();
+    toggleWheel(false);
+  }, true);
+
+  // ---- 自動下一步勾選（預設手動） ----
+  $('chkAuto').addEventListener('change', () => { autoNext = $('chkAuto').checked; });
+
+  // ---- 進入某步驟 ----
+  function enterStep(i) {
+    while (i < steps.length && steps[i].skippable && skipHCA) i++;
+    if (i >= steps.length) { finishAll(); return false; }
+    current = i;
+    remaining = steps[i].time;
+    if (i === 1) $('time1').value = fmt(steps[1].time);
+    lastTickSec = null;
+    finished = false;
+    document.body.classList.add('started');
+    updateCards();
+    render();
+    scrollToCard(i);
+    return true;
+  }
+
+  function scrollToCard(i) {
+    $('card' + i)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  function finishAll() {
+    stopTick();
+    running = false;
+    waiting = false;
+    finished = true;
+    current = steps.length;
+    document.body.classList.remove('started');
+    updateCards();
+    $('stepLabel').textContent = '完成';
+    $('stepName').textContent = '沖洗結束';
+    $('stepNote').textContent = '全部完成，掛起來晾乾吧！';
+    $('timeDisplay').textContent = '00:00';
+    $('timeDisplay').classList.remove('last5', 'waiting');
+    ringWrap.classList.remove('last5', 'flash');
+    ringFg.style.strokeDashoffset = 0;
+    ringFg.style.stroke = 'var(--ok)';
+    $('btnStart').textContent = '開始';
+    $('btnStart').classList.add('primary');
+    $('btnSkip').disabled = true;
+    releaseWake();
+    allDoneBeep();
+  }
+
+  // 手動模式：停在下一步，等使用者按「開始」
+  function pauseBeforeStep() {
+    stopTick();
+    running = false;
+    waiting = true;
+    $('btnStart').textContent = '開始';
+    $('btnStart').classList.add('primary');
+    $('timeDisplay').classList.add('waiting');
+    const st = steps[current];
+    $('stepNote').textContent = '⏸ 按「開始」執行：' + st.name + '\n' + st.note;
+  }
+
+  // ---- 計時 ----
+  function startTick() {
+    stopTick();
+    let last = Date.now();
+    timerId = setInterval(() => {
+      const now = Date.now();
+      remaining -= (now - last) / 1000;
+      last = now;
+
+      // 倒數 5 秒：每秒嗶一聲 + 整個圓圈閃一下
+      const sec = Math.ceil(remaining);
+      if (sec >= 1 && sec <= 5 && sec !== lastTickSec) {
+        lastTickSec = sec;
+        countTick(sec);
+        flashRing();
+      }
+
+      if (remaining <= 0) {
+        stepEndBeep();
+        ringWrap.classList.remove('last5', 'flash');
+        const ok = enterStep(current + 1);
+        if (ok && !autoNext) pauseBeforeStep();
+      }
+      render();
+    }, 100);
+  }
+  function stopTick() { if (timerId) { clearInterval(timerId); timerId = null; } }
+
+  // ---- 畫面更新 ----
+  function render() {
+    if (current < 0 || current >= steps.length) return;
+    const st = steps[current];
+    $('stepLabel').textContent = '步驟 ' + (current + 1) + '/' + steps.length + (waiting ? '・待開始' : '');
+    $('stepName').innerHTML = st.name + ' <span class="sn-en">' + st.en + '</span>';
+    if (!waiting) $('stepNote').textContent = st.note;
+    $('timeDisplay').textContent = fmt(remaining);
+    const last5 = running && remaining <= 5.5 && remaining > 0;
+    $('timeDisplay').classList.toggle('last5', last5);
+    ringWrap.classList.toggle('last5', last5);
+    $('timeTotal').textContent = '共 ' + fmt(st.time);
+    const frac = Math.max(0, Math.min(1, remaining / st.time));
+    ringFg.style.stroke = '';
+    ringFg.style.strokeDashoffset = CIRC * (1 - frac);
+  }
+
+  function updateCards() {
+    steps.forEach((st, i) => {
+      const card = $('card' + i);
+      card.classList.toggle('active', i === current);
+      card.classList.toggle('done', (i < current || finished) && !(st.skippable && skipHCA));
+      if (st.skippable) card.classList.toggle('skipped', skipHCA);
+    });
+  }
+
+  // ---- 按鈕 ----
+  $('btnStart').addEventListener('click', () => {
+    ctx(); // iOS 需在手勢中啟用音訊
+    if (finished) resetAll();
+    if (current < 0) enterStep(0);
+    waiting = false;
+    $('timeDisplay').classList.remove('waiting');
+    running = !running;
+    if (running) {
+      startTick();
+      requestWake();
+      $('btnStart').textContent = '暫停';
+      $('btnStart').classList.remove('primary');
+      $('btnSkip').disabled = false;
+      render();
+    } else {
+      stopTick();
+      $('btnStart').textContent = '繼續';
+      $('btnStart').classList.add('primary');
+    }
+  });
+
+  $('btnSkip').addEventListener('click', () => {
+    if (current < 0) return;
+    ringWrap.classList.remove('last5', 'flash');
+    const ok = enterStep(current + 1);
+    if (ok && !autoNext && running) pauseBeforeStep();
+    if (ok) render();
+  });
+
+  function resetAll() {
+    stopTick();
+    releaseWake();
+    running = false;
+    waiting = false;
+    finished = false;
+    current = -1;
+    lastTickSec = null;
+    document.body.classList.remove('started');
+    $('stepLabel').textContent = '步驟 —';
+    $('stepName').textContent = '準備開始';
+    $('stepNote').textContent = '按「開始」從步驟 1 預洗開始';
+    $('timeDisplay').textContent = '--:--';
+    $('timeDisplay').classList.remove('last5', 'waiting');
+    $('timeTotal').textContent = '';
+    ringWrap.classList.remove('last5', 'flash');
+    ringFg.style.strokeDashoffset = 0;
+    ringFg.style.stroke = '';
+    $('btnStart').textContent = '開始';
+    $('btnStart').classList.add('primary');
+    $('btnSkip').disabled = true;
+    if (!devSet) $('time1').value = '';   // 未選過顯影時間 → 回到 --:--
+    updateCards();
+  }
+
+  $('btnReset').addEventListener('click', resetAll);
+
+  // 點擊步驟卡直接跳到該步驟
+  document.addEventListener('click', e => {
+    const card = e.target.closest('.step-card');
+    if (!card || e.target.closest('.toggle-row') || e.target.closest('input.time-input') || e.target.closest('.wheel-picker')) return;
+    const i = parseInt(card.id.replace('card', ''), 10);
+    if (steps[i].skippable && skipHCA) return;
+    finished = false;
+    waiting = false;
+    $('timeDisplay').classList.remove('waiting');
+    ringWrap.classList.remove('last5', 'flash');
+    enterStep(i);
+    if (!running) {
+      $('btnStart').textContent = '開始';
+      $('btnStart').classList.add('primary');
+    }
+    $('btnSkip').disabled = false;
+  });
+
+  buildList();
+})();
+</script>
+</body>
+</html>
